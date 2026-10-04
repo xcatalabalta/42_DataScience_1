@@ -38,7 +38,7 @@ ex04: ## Executes ex04 only with the directory items
 	@./ex04/items_table.py
 
 .PHONY: fclean
-fclean: ## Cleans up database and deletes all the data files
+fclean: ## Cleans up database as its previous state before the first run
 	@./utils/reset_db.py
 
 .PHONY: database
