@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ex04 / items_table.py
+utils / items_table.py
 
 Creates the PostgreSQL table `items` from item/item.csv.
 
@@ -20,8 +20,7 @@ Behaviour:
   - DROP TABLE IF EXISTS items, then CREATE, then bulk-load via
     COPY ... FROM STDIN (client-side, like \\copy).
   - Password requested once (getpass, no echo).
-  - Self-locating: finds item/item.csv relative to this script (script lives in
-    ex04/, data folder is a sibling of the exercise folders at the repo root).
+  - Fixed location according to new specifications
   - Idempotent: safe to re-run.
 
 Run it (both work; shebang present and file is executable):
@@ -61,10 +60,11 @@ FROM STDIN WITH (FORMAT csv, HEADER true, NULL '');
 
 
 def find_csv_path():
-    """Resolve item/item.csv relative to the repo root, derived from this
-    script's location (script lives in ex04/, repo root is its parent)."""
+    """
+    Resolve items/item.csv expanding user
+    """
     # script_dir = os.path.dirname(os.path.abspath(__file__))
-    # repo_root = os.path.dirname(script_dir)          # parent of ex04/
+    # repo_root = os.path.dirname(script_dir)
     csv_path = os.path.expanduser(os.path.join(DATA_SUBDIR, CSV_FILENAME))
     if not os.path.isfile(csv_path):
         sys.exit(f"ERROR: CSV not found at {csv_path}\n"
