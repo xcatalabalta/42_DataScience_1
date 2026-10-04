@@ -65,7 +65,7 @@ def find_csv_path():
     script's location (script lives in ex04/, repo root is its parent)."""
     # script_dir = os.path.dirname(os.path.abspath(__file__))
     # repo_root = os.path.dirname(script_dir)          # parent of ex04/
-    csv_path = os.path.join(DATA_SUBDIR, CSV_FILENAME)
+    csv_path = os.path.expanduser(os.path.join(DATA_SUBDIR, CSV_FILENAME))
     if not os.path.isfile(csv_path):
         sys.exit(f"ERROR: CSV not found at {csv_path}\n"
                  f"Did you run the decompress script first?")
