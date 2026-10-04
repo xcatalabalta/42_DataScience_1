@@ -1,5 +1,5 @@
 # Set the default goal so running `make` with no arguments prints the help menu
-.DEFAULT_GOAL := help
+.DEFAULT_GOAL := database
 
 .PHONY: help
 help: ## Show this help menu
@@ -36,14 +36,17 @@ ex03: ## Executes ex03 only with the directory customer
 ex04: ## Executes ex04 only with the directory items
 	@./utils/decompress_items.sh
 	@./ex04/items_table.py
+
 .PHONY: fclean
 fclean: ## Cleans up database and deletes all the data files
 	@./utils/reset_project.sh
+
 .PHONY: inspect
 inspect: ## Charges the full database and runs the inspect scripts
-	@./utils/decompress_data.sh --force
 	./utils/inspect_customer.sh
 	./utils/inspect_item.sh
+
 .PHONY: database
 database: ## Charges the full database
-	@./utils/decompress_data.sh --force
+	@./utils/automatic_table.py
+	@./utils/items_table.py
