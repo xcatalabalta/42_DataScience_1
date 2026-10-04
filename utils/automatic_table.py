@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ex03 / automatic_table.py
+utils / automatic_table.py
 
 Automatically creates a PostgreSQL table for every CSV in the customer/ folder,
 each table named after its CSV file (without the .csv extension), e.g.
@@ -16,7 +16,7 @@ each (DATETIME first column + six distinct data types):
   user_session  UUID
 
 Behaviour:
-  - Reads every *.csv in customer/ (resolved relative to this script).
+  - Reads every *.csv in customer.
   - For each file: DROP TABLE IF EXISTS, then CREATE, then bulk-load via
     COPY ... FROM STDIN (client-side, like \\copy).
   - Per-file transaction: a failure on one file is reported to the console and
@@ -40,8 +40,8 @@ DB_NAME = "piscineds"
 DB_USER = "fcatala-"
 DB_HOST = "localhost"
 DB_PORT = 5432
-# folder (relative to repo root) to scan for CSVs
-DATA_SUBDIR = "data/customer"
+# folder (absolut) to scan for CSVs
+DATA_SUBDIR = "~/data_piscineds/data/customer"
 
 
 def create_sql(table):
@@ -66,17 +66,16 @@ FROM STDIN WITH (FORMAT csv, HEADER true, NULL '');
 
 def find_csv_path():
     """
-    Resolve the customer/ folder relative to the repo root, derived from this
-    script's location (script lives in ex03/, repo root is its parent).
+    Resolve the customer/ folder.
     Arguments:
         None
     Returns:
         the absolute path to the customer/ folder (string) if found,
     or exits with an error if not found.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(script_dir)          # parent of ex03/
-    csv_path = os.path.join(repo_root, DATA_SUBDIR)
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # repo_root = os.path.dirname(script_dir)
+    csv_path = os.path.expanduser(os.path.join(DATA_SUBDIR))
     if not os.path.isdir(csv_path):
         sys.exit(f"ERROR: data folder not found at {csv_path}\n"
                  f"Did you run the decompress script first?")
