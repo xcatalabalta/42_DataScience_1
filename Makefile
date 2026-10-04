@@ -41,11 +41,6 @@ ex04: ## Executes ex04 only with the directory items
 fclean: ## Cleans up database and deletes all the data files
 	@./utils/reset_project.sh
 
-.PHONY: inspect
-inspect: ## Charges the full database and runs the inspect scripts
-	./utils/inspect_customer.sh
-	./utils/inspect_item.sh
-
 .PHONY: database
 database: ## Charges the full database
 	@./utils/automatic_table.py
