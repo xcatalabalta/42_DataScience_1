@@ -39,7 +39,7 @@ ex04: ## Executes ex04 only with the directory items
 
 .PHONY: fclean
 fclean: ## Cleans up database and deletes all the data files
-	@./utils/reset_project.sh
+	@./utils/reset_db.py
 
 .PHONY: database
 database: ## Charges the full database
