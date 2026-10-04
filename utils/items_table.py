@@ -41,8 +41,8 @@ DB_HOST = "localhost"
 DB_PORT = 5432
 
 TABLE_NAME = "items"
-# folder (relative to repo root)
-DATA_SUBDIR = "data/item"
+# folder (absolut)
+DATA_SUBDIR = "~/data_piscineds/data/items"
 CSV_FILENAME = "item.csv"
 
 CREATE_SQL = f"""
@@ -63,9 +63,9 @@ FROM STDIN WITH (FORMAT csv, HEADER true, NULL '');
 def find_csv_path():
     """Resolve item/item.csv relative to the repo root, derived from this
     script's location (script lives in ex04/, repo root is its parent)."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(script_dir)          # parent of ex04/
-    csv_path = os.path.join(repo_root, DATA_SUBDIR, CSV_FILENAME)
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # repo_root = os.path.dirname(script_dir)          # parent of ex04/
+    csv_path = os.path.join(DATA_SUBDIR, CSV_FILENAME)
     if not os.path.isfile(csv_path):
         sys.exit(f"ERROR: CSV not found at {csv_path}\n"
                  f"Did you run the decompress script first?")
