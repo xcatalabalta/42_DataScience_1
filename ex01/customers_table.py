@@ -4,7 +4,7 @@ ex01 / customers_table.py  (module 1 - Data Warehouse)
 
 Joins all the monthly data_202*_*** tables into a single table "customers".
 
-How it works:
+How it works: 1
   1. Lists the CSV files in ~/data_piscineds/data/customer (tilde expanded)
      and derives the expected table names (data_2022_oct.csv -> data_2022_oct).
   2. Lists the monthly tables that actually exist in the database
