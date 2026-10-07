@@ -3,7 +3,8 @@
 ex02 / remove_duplicates.py  (module 1 - Data Warehouse)
 
 Deletes the duplicate rows of the "customers" table, including the events
-the server sends twice with a 1 second interval (subject warning).
+the server sends twice with a 1 second interval (subject warning), and
+keeps the removed rows in a separate table "dups_customer" for inspection.
 
 Definition of a duplicate:
   Rows are grouped by EVERY column except event_time (event_type,
@@ -11,25 +12,33 @@ Definition of a duplicate:
   hardcoded) and ordered by event_time inside each group. A row is a
   duplicate when it arrives <= 1 second after the previous row of its
   group (LAG(event_time)):
-    - exact duplicate      -> difference 0 s  -> removed
-    - server re-send       -> difference 1 s  -> removed
+    - exact duplicate      -> difference 0 s  -> removed ('exact')
+    - server re-send       -> difference 1 s  -> removed ('resend')
     - same action later    -> difference > 1 s -> kept (genuine new event)
   Note: a chain of re-sends (0 s, 1 s, 2 s, ...) collapses to its first
   row, since each row is compared with the row just before it.
 
-How it works (rebuild-and-swap, ONE transaction):
-  1. CREATE TABLE customers_dedup (LIKE customers INCLUDING ALL)
-  2. INSERT the rows that are NOT duplicates (window function LAG)
-  3. DROP customers, RENAME customers_dedup -> customers, ANALYZE
-  Rebuilding is much faster than DELETE on ~20M rows and leaves no dead
-  rows (no VACUUM FULL needed). Any error rolls everything back, leaving
-  the original customers table untouched.
+How it works (ONE transaction, ONE pass over customers):
+  1. CREATE customers_dedup (LIKE customers) and dups_customer_new
+     (LIKE customers + prev_event_time + dup_kind).
+  2. A single statement computes LAG once (materialized CTE) and, thanks
+     to a data-modifying CTE, sends each row to one of the two tables:
+     kept rows -> customers_dedup, duplicates -> dups_customer_new.
+  3. Conservation check: kept + duplicates must equal the original count.
+  4. DROP customers, RENAME customers_dedup -> customers, ANALYZE.
+     dups_customer_new replaces dups_customer only if duplicates were
+     found (a re-run on clean data does not wipe the previous evidence).
+  Any error rolls everything back, leaving customers untouched.
+
+Table dups_customer:
+  same columns as customers, plus
+    prev_event_time  event_time of the row it duplicates
+    dup_kind         'exact' (0 s) or 'resend' (<= 1 s)
 
 Options:
   --yes     skip the confirmation prompt
-  --check   also report how many duplicates are exact (0 s) vs re-sends
-            (<= 1 s) before deleting, and verify afterwards that no
-            duplicate remains (extra full scans: slower)
+  --check   count duplicates BEFORE asking for confirmation (extra full
+            scan) and verify AFTERWARDS that none remains (another scan)
 
 Run it (both work; shebang present and file is executable):
     ./remove_duplicates.py [--yes] [--check]
@@ -51,6 +60,8 @@ DB_PORT = 5432
 
 TABLE = "customers"
 TMP_TABLE = "customers_dedup"
+DUPS_TABLE = "dups_customer"
+DUPS_TMP = "dups_customer_new"
 TIME_COL = "event_time"
 MAX_GAP = "1 second"        # rows this close (or closer) are duplicates
 WORK_MEM = "256MB"          # sort memory for the window function
@@ -163,37 +174,81 @@ def duplicate_stats(cur, table, columns):
     return exact, resend
 
 
-def build_dedup_table(cur, columns):
+def create_target_tables(cur):
     """
-    Create TMP_TABLE with the structure of TABLE and fill it with the rows
-    that are not duplicates.
+    Create the two empty target tables: TMP_TABLE (kept rows, same
+    structure as TABLE) and DUPS_TMP (duplicates, same structure plus
+    prev_event_time and dup_kind).
+    Arguments:
+        cur: open psycopg2 cursor (inside the transaction)
+    Returns:
+        None
+    """
+    for name in (TMP_TABLE, DUPS_TMP):
+        cur.execute(sql.SQL("DROP TABLE IF EXISTS {};")
+                    .format(sql.Identifier(name)))
+        cur.execute(sql.SQL("CREATE TABLE {} (LIKE {} INCLUDING ALL);")
+                    .format(sql.Identifier(name), sql.Identifier(TABLE)))
+    cur.execute(sql.SQL(
+        "ALTER TABLE {} ADD COLUMN prev_event_time TIMESTAMP, "
+        "ADD COLUMN dup_kind VARCHAR(8);"
+    ).format(sql.Identifier(DUPS_TMP)))
+
+
+def split_rows(cur, columns):
+    """
+    In a single pass over TABLE, send the kept rows to TMP_TABLE and the
+    duplicates to DUPS_TMP. LAG is computed once (materialized CTE); the
+    duplicates are written by a data-modifying CTE.
     Arguments:
         cur:     open psycopg2 cursor (inside the transaction)
         columns: all column names of TABLE (list of str)
     Returns:
-        number of rows kept (int)
+        tuple (kept, dups): rows written to each table (tuple of int)
     """
-    cur.execute(sql.SQL("DROP TABLE IF EXISTS {};")
-                .format(sql.Identifier(TMP_TABLE)))
-    cur.execute(sql.SQL("CREATE TABLE {} (LIKE {} INCLUDING ALL);")
-                .format(sql.Identifier(TMP_TABLE), sql.Identifier(TABLE)))
     cols = sql.SQL(", ").join(map(sql.Identifier, columns))
+    t = sql.Identifier(TIME_COL)
+    gap = sql.Literal(MAX_GAP)
     cur.execute(sql.SQL(
-        "INSERT INTO {tmp} ({cols}) "
-        "SELECT {cols} FROM ({inner}) AS s "
+        "WITH s AS MATERIALIZED ({inner}), "
+        "d AS ("
+        "  INSERT INTO {dups} ({cols}, prev_event_time, dup_kind) "
+        "  SELECT {cols}, prev_time, "
+        "         CASE WHEN {t} = prev_time THEN 'exact' ELSE 'resend' END "
+        "  FROM s "
+        "  WHERE prev_time IS NOT NULL AND {t} - prev_time <= {gap}::interval"
+        ") "
+        "INSERT INTO {kept} ({cols}) "
+        "SELECT {cols} FROM s "
         "WHERE prev_time IS NULL OR {t} - prev_time > {gap}::interval;"
-    ).format(tmp=sql.Identifier(TMP_TABLE), cols=cols,
-             inner=lagged_select(TABLE, columns),
-             t=sql.Identifier(TIME_COL), gap=sql.Literal(MAX_GAP)))
-    return cur.rowcount
+    ).format(inner=lagged_select(TABLE, columns), dups=sql.Identifier(DUPS_TMP),
+             kept=sql.Identifier(TMP_TABLE), cols=cols, t=t, gap=gap))
+    kept = cur.rowcount
+    return kept, count_rows(cur, DUPS_TMP)
 
 
-def swap_tables(cur):
+def dups_breakdown(cur, table):
     """
-    Replace TABLE by TMP_TABLE (drop the old one, rename the new one) and
-    refresh the planner statistics.
+    Count the stored duplicates by kind ('exact' / 'resend').
     Arguments:
-        cur: open psycopg2 cursor (inside the transaction)
+        cur:   open psycopg2 cursor
+        table: duplicates table name (str)
+    Returns:
+        dict {dup_kind: count} (dict of str -> int)
+    """
+    cur.execute(sql.SQL("SELECT dup_kind, count(*) FROM {} GROUP BY dup_kind;")
+                .format(sql.Identifier(table)))
+    return dict(cur.fetchall())
+
+
+def swap_tables(cur, dups_found):
+    """
+    Replace TABLE by TMP_TABLE and refresh its statistics. Replace
+    DUPS_TABLE by DUPS_TMP only if duplicates were found; otherwise drop
+    DUPS_TMP so a re-run on clean data keeps the previous evidence.
+    Arguments:
+        cur:        open psycopg2 cursor (inside the transaction)
+        dups_found: number of duplicates found in this run (int)
     Returns:
         None
     """
@@ -201,6 +256,14 @@ def swap_tables(cur):
     cur.execute(sql.SQL("ALTER TABLE {} RENAME TO {};")
                 .format(sql.Identifier(TMP_TABLE), sql.Identifier(TABLE)))
     cur.execute(sql.SQL("ANALYZE {};").format(sql.Identifier(TABLE)))
+    if dups_found:
+        cur.execute(sql.SQL("DROP TABLE IF EXISTS {};")
+                    .format(sql.Identifier(DUPS_TABLE)))
+        cur.execute(sql.SQL("ALTER TABLE {} RENAME TO {};")
+                    .format(sql.Identifier(DUPS_TMP),
+                            sql.Identifier(DUPS_TABLE)))
+    else:
+        cur.execute(sql.SQL("DROP TABLE {};").format(sql.Identifier(DUPS_TMP)))
 
 
 def confirm(before):
@@ -213,14 +276,16 @@ def confirm(before):
     """
     if "--yes" in sys.argv:
         return True
-    answer = input(f"Remove duplicates from {TABLE} ({before} rows)? [y/N] ")
+    answer = input(f"Remove duplicates from {TABLE} ({before} rows) and "
+                   f"store them in {DUPS_TABLE}? [y/N] ")
     return answer.strip().lower() in ("y", "yes")
 
 
 def main():
     """
-    Orchestrate the process: optional statistics, confirmation,
-    rebuild-and-swap in one transaction, report, optional verification.
+    Orchestrate the process: optional statistics, confirmation, single-pass
+    split into kept rows and duplicates, conservation check, swap, report,
+    optional verification.
     Arguments:
         none (reads the --yes and --check flags from sys.argv)
     Returns:
@@ -248,9 +313,10 @@ def main():
                     sys.exit(f"ERROR: {TABLE} has no {TIME_COL} column.")
 
                 before = count_rows(cur, TABLE)
+                group = ", ".join(c for c in columns if c != TIME_COL)
                 print(f"{TABLE}: {before} rows")
-                print(f"Duplicate = same {', '.join(c for c in columns if c != TIME_COL)}"
-                      f" and {TIME_COL} <= {MAX_GAP} after the previous one")
+                print(f"Duplicate = same {group} and {TIME_COL} "
+                      f"<= {MAX_GAP} after the previous one")
 
                 if check:
                     print("Counting duplicates (--check) ...")
@@ -263,19 +329,28 @@ def main():
                     return
 
                 start = time.time()
-                print("Building de-duplicated table ...")
-                kept = build_dedup_table(cur, columns)
-                if kept > before:
-                    raise RuntimeError(f"kept {kept} rows > original {before}")
-                swap_tables(cur)
-                removed = before - kept
-                print(f"Done in {time.time() - start:.0f} s. "
-                      f"{TABLE}: {before} -> {kept} rows "
-                      f"({removed} duplicates removed, "
-                      f"{100 * removed / before:.2f}%).")
-                if check and removed != exact + resend:
+                print("Splitting rows into kept rows and duplicates ...")
+                create_target_tables(cur)
+                kept, dups = split_rows(cur, columns)
+                if kept + dups != before:
                     raise RuntimeError(
-                        f"removed {removed} rows but statistics "
+                        f"conservation check failed: kept {kept} + "
+                        f"duplicates {dups} != original {before}")
+                breakdown = dups_breakdown(cur, DUPS_TMP)
+                swap_tables(cur, dups)
+
+                print(f"Done in {time.time() - start:.0f} s.")
+                print(f"  {TABLE:<14}: {before} -> {kept} rows")
+                print(f"  {DUPS_TABLE:<14}: {dups} rows "
+                      f"({100 * dups / before:.2f}%) "
+                      f"exact={breakdown.get('exact', 0)} "
+                      f"resend={breakdown.get('resend', 0)}"
+                      + ("" if dups else "  (no new duplicates: previous "
+                         f"{DUPS_TABLE} kept)"))
+                print(f"  conservation  : {kept} + {dups} = {before} OK")
+                if check and dups != exact + resend:
+                    raise RuntimeError(
+                        f"removed {dups} rows but statistics "
                         f"predicted {exact + resend}")
 
         if check:
