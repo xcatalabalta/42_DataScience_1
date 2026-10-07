@@ -13,7 +13,6 @@ ex00: database ## Regenerates the project from scratch ready to inspect
 ex01: ## Join all the data_202*_*** tables together in a table called "customers"
 	@./ex01/customers_table.py
 
-
 .PHONY: ex02
 ex02: ## Executes ex02 only with the directory customer
 	@./utils/decompress_customer.sh
@@ -33,7 +32,10 @@ ex04: ## Executes ex04 only with the directory items
 fclean: ## Cleans up database as its previous state before the first run
 	@./utils/reset_db.py
 
+.PHONY: re
+re: fclean database ## Cleans up database and recreates it
+
 .PHONY: database
-database: ## Charges the full database
+database: ## Charges the full database (default target)
 	@./utils/automatic_table.py
 	@./utils/items_table.py
