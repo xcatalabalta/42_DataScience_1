@@ -6,7 +6,7 @@ help: ## Show this help menu
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: ex00
-ex00: database ## Show the instructions for the project
+ex00: database ## Regenerates the project from scratch ready to inspect
 	@echo "Please open DBeaver to inspect the database for this exercise."
 
 .PHONY: ex01
