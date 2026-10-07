@@ -1,4 +1,4 @@
-# Set the default goal so running `make` with no arguments prints the help menu
+# Set the default goal so running `make` with no arguments charges the full database
 .DEFAULT_GOAL := database
 
 .PHONY: help
@@ -11,12 +11,13 @@ ex00: database ## Regenerates the project from scratch ready to inspect
 
 .PHONY: ex01
 ex01: ## Join all the data_202*_*** tables together in a table called "customers"
+	@chmod +x ex01/customers_table.py
 	@./ex01/customers_table.py
 
 .PHONY: ex02
-ex02: ## Executes ex02 only with the directory customer
-	@./utils/decompress_customer.sh
-	@./ex02/table.py
+ex02: ## Removes dupllicates
+	@chmod +x ex02/remove_duplicates
+	@./ex02/remove_duplicates
 
 .PHONY: ex03
 ex03: ## Executes ex03 only with the directory customer
