@@ -16,8 +16,8 @@ ex01: ## Join all the data_202*_*** tables together in a table called "customers
 
 .PHONY: ex02
 ex02: ## Removes dupllicates
-	@chmod +x ex02/remove_duplicates
-	@./ex02/remove_duplicates --check
+	@chmod +x ex02/remove_duplicates.py
+	@./ex02/remove_duplicates.py --check
 
 .PHONY: ex03
 ex03: ## Executes ex03 only with the directory customer
