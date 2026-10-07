@@ -10,8 +10,8 @@ ex00: database ## Regenerates the project from scratch ready to inspect
 	@echo "Please open DBeaver to inspect the database for this exercise."
 
 .PHONY: ex01
-ex01: ## Requires the evaluator to open DBeaver to inspect the database.
-	echo "Please open DBeaver to inspect the database for this exercise."
+ex01: ## Join all the data_202*_*** tables together in a table called "customers"
+	@./ex01/customers_table.py
 
 
 .PHONY: ex02
