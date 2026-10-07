@@ -222,7 +222,7 @@ def main():
         sys.exit(f"ERROR: could not connect to the database.\n{e}")
 
     try:
-        with conn:                      # build: one transaction, all or nothing
+        with conn:                   # build: one transaction, all or nothing
             with conn.cursor() as cur:
                 tables = existing_monthly_tables(cur)
 
