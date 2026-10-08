@@ -5,7 +5,7 @@ ex01 / customers_table.py  (module 1 - Data Warehouse)
 Joins all the monthly data_202*_*** tables into a single table "customers".
 
 How it works:
-  1. Lists the CSV files in ~/data_piscineds/data/customer (tilde expanded)
+  1. Lists the CSV files in the DATA_CUSTOMER folder of env_sample.txt / .env
      and derives the expected table names (data_2022_oct.csv -> data_2022_oct).
   2. Lists the monthly tables that actually exist in the database
      (pg_tables, schema public, name matching ^data_20[0-9]{2}_[a-z]{3}$).
@@ -27,9 +27,13 @@ How it works:
      drops the monthly tables that were successfully appended, to free disk
      space. They can be rebuilt from the CSVs with module 0's scripts.
 
+Options (for the cleanse of step 7):
+  --keep   keep the monthly tables, do not ask (used by `make redo`)
+  --yes    drop the monthly tables, do not ask
+
 Run it (both work; shebang present and file is executable):
-    ./customers_table.py
-    python3 customers_table.py
+    ./customers_table.py [--keep | --yes]
+    python3 customers_table.py [--keep | --yes]
 """
 
 import os
@@ -39,32 +43,90 @@ import getpass
 import psycopg2
 from psycopg2 import sql
 
+
+def load_env():
+    """
+    Load the project settings into os.environ, from two files at the
+    repository root (one level above this script):
+      1. .env        created by `make getpass`, includes the password
+      2. env_sample.txt  committed defaults (everything except the password)
+    A variable already set is never overridden, so the priority is:
+    shell / make environment > .env > env_sample.txt.
+    Arguments:
+        none
+    Returns:
+        list of the files that were loaded (list of str)
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    loaded = []
+    for name in (".env", "env_sample.txt"):
+        path = os.path.join(root, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
+        loaded.append(path)
+    return loaded
+
+
+def setting(name):
+    """
+    Read one project setting from the environment (filled by load_env()).
+    Arguments:
+        name: variable name, e.g. "PGDATABASE" (str)
+    Returns:
+        its value (str); exits with a clear message if it is missing
+    """
+    value = os.environ.get(name)
+    if not value:
+        sys.exit(f"ERROR: setting {name} not found (check env_sample.txt / .env).")
+    return value
+
+
+load_env()
+
 # --- Configuration ----------------------------------------------------------
-DB_NAME = "piscineds"
-DB_USER = "fcatala-"
-DB_HOST = "localhost"
-DB_PORT = 5432
+# Settings: .env (with password) or env_sample.txt -- see load_env()
+DB_NAME = setting("PGDATABASE")
+DB_USER = setting("PGUSER")
+DB_HOST = setting("PGHOST")
+DB_PORT = int(setting("PGPORT"))
 
 TARGET_TABLE = "customers"
-DATA_DIR = os.path.expanduser("~/data_piscineds/data/customer")
+DATA_DIR = os.path.expanduser(setting("DATA_CUSTOMER"))
 # Monthly table names: data_YYYY_mmm (e.g. data_2022_oct)
 TABLE_REGEX = r"^data_20[0-9]{2}_[a-z]{3}$"
 
 
-def get_password():
+def connect_db():
     """
-    Get the database password without storing it in the code.
-    Uses the PGPASSWORD environment variable if it is set, otherwise
-    prompts the user without echoing what is typed.
+    Open a connection to the database without storing any password in the
+    code. It first tries WITHOUT a password: libpq then uses, if present,
+    PGPASSWORD, loaded from the project's .env (written by
+    `make getpass`) or exported by the shell. Only if that first attempt fails does it prompt for
+    the password (no echo) and try once more.
     Arguments:
-        none
+        none (reads DB_NAME, DB_USER, DB_HOST and DB_PORT)
     Returns:
-        the password (str)
+        an open psycopg2 connection
+    Exits:
+        with an error message if the second attempt also fails
     """
-    env_pw = os.environ.get("PGPASSWORD")
-    if env_pw:
-        return env_pw
-    return getpass.getpass(f"Password for PostgreSQL user '{DB_USER}': ")
+    params = dict(dbname=DB_NAME, user=DB_USER, host=DB_HOST, port=DB_PORT)
+    try:
+        return psycopg2.connect(**params)
+    except psycopg2.OperationalError:
+        pass                            # no stored password, or a wrong one
+    password = getpass.getpass(f"Password for PostgreSQL user '{DB_USER}': ")
+    try:
+        return psycopg2.connect(password=password, **params)
+    except psycopg2.OperationalError as e:
+        sys.exit(f"ERROR: could not connect to the database.\n{e}")
 
 
 def expected_tables_from_csv():
@@ -177,19 +239,25 @@ def cleanse(conn, tables):
     Drop the monthly tables that were successfully appended to
     TARGET_TABLE, after asking the user for confirmation. Runs in its own
     transaction, only after the customers build has been committed.
+    Flags: --keep skips the cleanse without asking (tables kept);
+           --yes drops the tables without asking.
     Arguments:
         conn:   open psycopg2 connection
         tables: list of successfully appended table names (list of str)
     Returns:
-        number of tables dropped (int); 0 if the user declines
+        number of tables dropped (int); 0 if skipped or declined
     """
+    if "--keep" in sys.argv:
+        print("Cleanse skipped (--keep). Monthly tables kept.")
+        return 0
     print(f"\nThe following table(s) are now contained in {TARGET_TABLE}:")
     for t in tables:
         print(f"  - {t}")
-    answer = input("Drop them from the database to free space? [y/N] ")
-    if answer.strip().lower() not in ("y", "yes"):
-        print("Cleanse skipped. Monthly tables kept.")
-        return 0
+    if "--yes" not in sys.argv:
+        answer = input("Drop them from the database to free space? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Cleanse skipped. Monthly tables kept.")
+            return 0
 
     with conn:                          # separate transaction
         with conn.cursor() as cur:
@@ -211,18 +279,10 @@ def main():
         None (exits with a non-zero status on error)
     """
     expected = expected_tables_from_csv()
-    password = get_password()
+    conn = connect_db()
 
     try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME, user=DB_USER, password=password,
-            host=DB_HOST, port=DB_PORT,
-        )
-    except psycopg2.OperationalError as e:
-        sys.exit(f"ERROR: could not connect to the database.\n{e}")
-
-    try:
-        with conn:                   # build: one transaction, all or nothing
+        with conn:                      # build: one transaction, all or nothing
             with conn.cursor() as cur:
                 tables = existing_monthly_tables(cur)
 
