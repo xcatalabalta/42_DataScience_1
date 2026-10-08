@@ -50,6 +50,8 @@ The repository is designed to:
 │   └── remove_duplicates.py # exercise 02: remove duplicate rows from "customers"
 ├── ex03
 │   └── fusion.py            # exercise 03: combine "customers" with "items"
+├── img
+│   └── DBeaver_ex00.png     # images related to the outputs of the project
 └── utils
     ├── automatic_table.py   # load one table per monthly CSV
     ├── inspect_items.sql    # checks on "items" before the fusion
@@ -79,6 +81,7 @@ The data stays outside the repository (its location is set in `env_sample.txt`):
 | `ex01/` | *customers table*. Joins every `data_202*_***` table into `customers`. |
 | `ex02/` | *remove duplicates*. Removes exact duplicates and 1-second re-sends from `customers`. |
 | `ex03/` | *fusion*. Adds the item columns to `customers` without losing information. |
+| `img/` | Images related to the execution of the product (used as documentation). |
 | `utils/` | Support scripts that are not exercises: loading the raw data, inspecting it, and resetting the database. |
 
 ---
