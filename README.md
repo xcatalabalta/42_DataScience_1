@@ -298,7 +298,42 @@ With `make redo` the cleanse question is skipped (`--keep`):
 **Expected output** (`make ex02`)
 
 ```
-<!-- output of make ex02 -->
+customers: 20692840 rows
+Duplicate = same event_type, product_id, price, user_id, user_session and event_time <= 1 second after the previous one
+Counting duplicates (--check) ...
+  exact duplicates (0 s)       : 1109098
+  re-sends (<= 1 second)       : 407843
+Remove duplicates from customers (20692840 rows) and store them in dups_customer? [y/N] y
+Splitting rows into kept rows and duplicates ...
+Done in 210 s.
+  customers     : 20692840 -> 19175899 rows
+  dups_customer : 1516941 rows (7.33%) exact=1109098 resend=407843
+  conservation  : 19175899 + 1516941 = 20692840 OK
+Verifying (--check) ...
+  OK: no duplicate remains.
+```
+
+| | Rows |
+|---|---:|
+| `customers` before | 20,692,840 |
+| exact duplicates (0 s) | 1,109,098 |
+| re-sends (≤ 1 s) | 407,843 |
+| **removed**, stored in `dups_customer` | **1,516,941** (7.33%) |
+| **`customers` after** | **19,175,899** |
+
+What proves the result:
+- the duplicates removed are exactly the ones counted before asking (1,109,098 + 407,843);
+- **conservation:** rows kept + rows removed = original rows, so no row was lost;
+- the final pass finds no duplicate left in `customers`.
+
+To see the subject's example (a 1-second re-send) in the removed rows:
+
+```sql
+SELECT event_time, prev_event_time, dup_kind, event_type, product_id
+FROM dups_customer
+WHERE product_id = 5779403
+ORDER BY event_time
+LIMIT 5;
 ```
 
 ### Exercise 03: fusion
