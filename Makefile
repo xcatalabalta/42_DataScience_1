@@ -15,14 +15,14 @@ ex01: ## Join all the data_202*_*** tables together in a table called "customers
 	@./ex01/customers_table.py
 
 .PHONY: ex02
-ex02: ## Removes dupllicates
+ex02: ## Removes duplicates
 	@chmod +x ex02/remove_duplicates.py
 	@./ex02/remove_duplicates.py --check
 
 .PHONY: ex03
-ex03: ## Executes ex03 only with the directory customer
-	@./utils/decompress_customer.sh
-	@./ex03/automatic_table.py
+ex03: ## Combine the customers tables with items in the customers table
+	@chmod +x ex03/fusion.py
+	@./ex03/fusion.py
 
 .PHONY: inspect
 inspect: ## Runs inspect SQL instructions for the items table
