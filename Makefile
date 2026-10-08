@@ -30,10 +30,14 @@ inspect: ## Runs inspect SQL instructions for the items table
 
 .PHONY: fclean
 fclean: ## Cleans up database as its previous state before the first run
+	@chmod +x utils/reset_db.py
 	@./utils/reset_db.py
 
 .PHONY: re
 re: fclean database ## Cleans up database and recreates it
+
+.PHONY: redo
+redo: re ex01 ex02 ex03 ## Redoes the full module from scratch (all exercises)
 
 .PHONY: database
 database: ## Charges the full database (default target)
