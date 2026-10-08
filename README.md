@@ -371,5 +371,53 @@ The script then:
 **Expected output** (`make ex03`)
 
 ```
-<!-- output of make ex03 -->
+customers: 19175899 rows (1340 with a product not in items) | items: 109579 rows
+Item columns to add: category_id, category_code, brand
+Fuse items into customers (19175899 rows)? [y/N] y
+items collapsed to 54043 products (one row per product)
+items_conflicts: 1637 products with conflicting values (most frequent kept):
+  category_id   : 1617
+  category_code : 0
+  brand         : 24
+Done. customers: 19175899 -> 19175899 rows (no row lost, none multiplied)
+  events matched in items  : 19174559
+  events not in items      : 1340 (kept, item columns NULL)
+
+Timing:
+  connect                           :      0.02 s
+  profile customers (1 pass)        :      6.27 s
+  collapse items                    :      0.48 s
+  save conflicts                    :      0.56 s
+  build fused table (1 pass)        :     51.64 s
+  swap + analyze                    :      1.90 s
+  commit                            :      0.12 s
+  processing (database work)        :     60.99 s
+  total (incl. user input)          :       ...
+```
+
+| | Count |
+|---|---:|
+| `items` rows → products (one row each) | 109,579 → 54,043 |
+| products with conflicting values (`items_conflicts`) | 1,637 (≈3%) |
+| └ conflicts in `category_id` / `category_code` / `brand` | 1,617 / 0 / 24 |
+| `customers` before → after | 19,175,899 → 19,175,899 |
+| events matched in `items` | 19,174,559 |
+| events not in `items` (kept, item columns empty) | 1,340 |
+
+What proves the result:
+- **same row count before and after**: no event lost, none duplicated by the join;
+- matched + not matched = total (19,174,559 + 1,340 = 19,175,899);
+- the 1,340 events without an item are the ones `make inspect` found before the fusion;
+- every discarded alternative value is kept in `items_conflicts`, so no information is lost.
+
+The timer pauses while waiting for the confirmation: *processing* is the database work;
+*total* also includes the time spent answering the prompt.
+
+To see the alternatives kept for a product with a brand conflict:
+
+```sql
+SELECT product_id, item_rows, brand_values, brand_chosen
+FROM items_conflicts
+WHERE cardinality(brand_values) > 1
+LIMIT 10;
 ```
