@@ -214,9 +214,6 @@ Original CSV file contains 109579 rows of data.
 
 **Expected output**
 
-```
-![DBeaver: Tables of the project after execution](img/DBeaver_ex00.png)
-```
 <img width="931" height="417" alt="image" src="https://github.com/user-attachments/assets/4efc7f54-de05-4d95-a4fb-1ac3aafbafa7" />
 
 ### Exercise 01: customers table
