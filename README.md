@@ -240,7 +240,32 @@ Original CSV file contains 109579 rows of data.
 **Expected output** (`make ex01`)
 
 ```
-<!-- output of make ex01 -->
+```
+Joining 5 table(s) into customers: data_2022_dec, data_2022_nov, data_2022_oct, data_2023_feb, data_2023_jan
+Dropping table customers if it exists ...
+Creating table customers (same structure as data_2022_dec) ...
+Appending tables (original rows vs appended rows):
+  data_2022_dec   original    3533286  appended    3533286  OK
+  data_2022_nov   original    4635837  appended    4635837  OK
+  data_2022_oct   original    4102283  appended    4102283  OK
+  data_2023_feb   original    4156682  appended    4156682  OK
+  data_2023_jan   original    4264752  appended    4264752  OK
+Done. customers now contains 20692840 rows (sum of the monthly tables).
+
+The following table(s) are now contained in customers:
+  - data_2022_dec
+  ...
+Drop them from the database to free space? [y/N] n
+Cleanse skipped. Monthly tables kept.
+```
+
+What proves the result:
+- every monthly table is appended in full (`original` = `appended`, `OK` on each line);
+- `customers` has **20,692,840** rows, the sum of the five monthly tables;
+- duplicates are still there on purpose: they are removed in exercise 02.
+
+With `make redo` the cleanse question is skipped (`--keep`):
+`Cleanse skipped (--keep). Monthly tables kept.`
 ```
 
 ### Exercise 02: remove duplicates
