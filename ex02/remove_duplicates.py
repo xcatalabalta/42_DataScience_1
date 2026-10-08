@@ -52,11 +52,59 @@ import getpass
 import psycopg2
 from psycopg2 import sql
 
+
+def load_env():
+    """
+    Load the project settings into os.environ, from two files at the
+    repository root (one level above this script):
+      1. .env        created by `make getpass`, includes the password
+      2. env_sample.txt  committed defaults (everything except the password)
+    A variable already set is never overridden, so the priority is:
+    shell / make environment > .env > env_sample.txt.
+    Arguments:
+        none
+    Returns:
+        list of the files that were loaded (list of str)
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    loaded = []
+    for name in (".env", "env_sample.txt"):
+        path = os.path.join(root, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
+        loaded.append(path)
+    return loaded
+
+
+def setting(name):
+    """
+    Read one project setting from the environment (filled by load_env()).
+    Arguments:
+        name: variable name, e.g. "PGDATABASE" (str)
+    Returns:
+        its value (str); exits with a clear message if it is missing
+    """
+    value = os.environ.get(name)
+    if not value:
+        sys.exit(f"ERROR: setting {name} not found (check env_sample.txt / .env).")
+    return value
+
+
+load_env()
+
 # --- Configuration ----------------------------------------------------------
-DB_NAME = "piscineds"
-DB_USER = "fcatala-"
-DB_HOST = "localhost"
-DB_PORT = 5432
+# Settings: .env (with password) or env_sample.txt -- see load_env()
+DB_NAME = setting("PGDATABASE")
+DB_USER = setting("PGUSER")
+DB_HOST = setting("PGHOST")
+DB_PORT = int(setting("PGPORT"))
 
 TABLE = "customers"
 TMP_TABLE = "customers_dedup"
@@ -67,20 +115,30 @@ MAX_GAP = "1 second"        # rows this close (or closer) are duplicates
 WORK_MEM = "256MB"          # sort memory for the window function
 
 
-def get_password():
+def connect_db():
     """
-    Get the database password without storing it in the code.
-    Uses the PGPASSWORD environment variable if it is set, otherwise
-    prompts the user without echoing what is typed.
+    Open a connection to the database without storing any password in the
+    code. It first tries WITHOUT a password: libpq then uses, if present,
+    PGPASSWORD, loaded from the project's .env (written by
+    `make getpass`) or exported by the shell. Only if that first attempt fails does it prompt for
+    the password (no echo) and try once more.
     Arguments:
-        none
+        none (reads DB_NAME, DB_USER, DB_HOST and DB_PORT)
     Returns:
-        the password (str)
+        an open psycopg2 connection
+    Exits:
+        with an error message if the second attempt also fails
     """
-    env_pw = os.environ.get("PGPASSWORD")
-    if env_pw:
-        return env_pw
-    return getpass.getpass(f"Password for PostgreSQL user '{DB_USER}': ")
+    params = dict(dbname=DB_NAME, user=DB_USER, host=DB_HOST, port=DB_PORT)
+    try:
+        return psycopg2.connect(**params)
+    except psycopg2.OperationalError:
+        pass                            # no stored password, or a wrong one
+    password = getpass.getpass(f"Password for PostgreSQL user '{DB_USER}': ")
+    try:
+        return psycopg2.connect(password=password, **params)
+    except psycopg2.OperationalError as e:
+        sys.exit(f"ERROR: could not connect to the database.\n{e}")
 
 
 def table_exists(cur, table):
@@ -128,7 +186,7 @@ def count_rows(cur, table):
     return cur.fetchone()[0]
 
 
-def lagg_select(table, columns):
+def lagged_select(table, columns):
     """
     Build the inner query that adds, to every row, the event_time of the
     previous row of its group (same values in all the other columns).
@@ -168,7 +226,7 @@ def duplicate_stats(cur, table, columns):
         "AND {t} - prev_time <= {gap}::interval) "
         "FROM ({inner}) AS s;"
     ).format(t=sql.Identifier(TIME_COL), gap=sql.Literal(MAX_GAP),
-             inner=lagg_select(table, columns))
+             inner=lagged_select(table, columns))
     cur.execute(query)
     exact, resend = cur.fetchone()
     return exact, resend
@@ -221,7 +279,7 @@ def split_rows(cur, columns):
         "INSERT INTO {kept} ({cols}) "
         "SELECT {cols} FROM s "
         "WHERE prev_time IS NULL OR {t} - prev_time > {gap}::interval;"
-    ).format(inner=lagg_select(TABLE, columns), dups=sql.Identifier(DUPS_TMP),
+    ).format(inner=lagged_select(TABLE, columns), dups=sql.Identifier(DUPS_TMP),
              kept=sql.Identifier(TMP_TABLE), cols=cols, t=t, gap=gap))
     kept = cur.rowcount
     return kept, count_rows(cur, DUPS_TMP)
@@ -292,14 +350,7 @@ def main():
         None (exits with a non-zero status on error)
     """
     check = "--check" in sys.argv
-    password = get_password()
-    try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME, user=DB_USER, password=password,
-            host=DB_HOST, port=DB_PORT,
-        )
-    except psycopg2.OperationalError as e:
-        sys.exit(f"ERROR: could not connect to the database.\n{e}")
+    conn = connect_db()
 
     try:
         with conn:                      # one transaction: all or nothing
