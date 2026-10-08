@@ -50,8 +50,11 @@ def load_env():
     repository root (one level above this script):
       1. .env        created by `make getpass`, includes the password
       2. env_sample.txt  committed defaults (everything except the password)
-    A variable already set is never overridden, so the priority is:
-    shell / make environment > .env > env_sample.txt.
+    A variable already set to a non-empty value is never overridden, so
+    the priority is: shell / make environment > .env > env_sample.txt.
+    An EMPTY variable counts as unset: make exports the empty PGPASSWORD
+    of env_sample.txt when .env does not exist yet, and that must not hide
+    the password that `make getpass` has just written to .env.
     Arguments:
         none
     Returns:
@@ -69,7 +72,9 @@ def load_env():
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, value = line.split("=", 1)
-                os.environ.setdefault(key.strip(), value.strip())
+                key, value = key.strip(), value.strip()
+                if value and not os.environ.get(key):   # empty = unset
+                    os.environ[key] = value
         loaded.append(path)
     return loaded
 
