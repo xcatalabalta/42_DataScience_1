@@ -128,7 +128,7 @@ def count_rows(cur, table):
     return cur.fetchone()[0]
 
 
-def lagged_select(table, columns):
+def lagg_select(table, columns):
     """
     Build the inner query that adds, to every row, the event_time of the
     previous row of its group (same values in all the other columns).
@@ -168,7 +168,7 @@ def duplicate_stats(cur, table, columns):
         "AND {t} - prev_time <= {gap}::interval) "
         "FROM ({inner}) AS s;"
     ).format(t=sql.Identifier(TIME_COL), gap=sql.Literal(MAX_GAP),
-             inner=lagged_select(table, columns))
+             inner=lagg_select(table, columns))
     cur.execute(query)
     exact, resend = cur.fetchone()
     return exact, resend
@@ -221,7 +221,7 @@ def split_rows(cur, columns):
         "INSERT INTO {kept} ({cols}) "
         "SELECT {cols} FROM s "
         "WHERE prev_time IS NULL OR {t} - prev_time > {gap}::interval;"
-    ).format(inner=lagged_select(TABLE, columns), dups=sql.Identifier(DUPS_TMP),
+    ).format(inner=lagg_select(TABLE, columns), dups=sql.Identifier(DUPS_TMP),
              kept=sql.Identifier(TMP_TABLE), cols=cols, t=t, gap=gap))
     kept = cur.rowcount
     return kept, count_rows(cur, DUPS_TMP)
