@@ -238,8 +238,6 @@ Original CSV file contains 109579 rows of data.
 - The monthly tables can only be dropped after `customers` has been saved and checked.
 
 **Expected output** (`make ex01`)
-
-```
 ```
 Joining 5 table(s) into customers: data_2022_dec, data_2022_nov, data_2022_oct, data_2023_feb, data_2023_jan
 Dropping table customers if it exists ...
@@ -266,7 +264,6 @@ What proves the result:
 
 With `make redo` the cleanse question is skipped (`--keep`):
 `Cleanse skipped (--keep). Monthly tables kept.`
-```
 
 ### Exercise 02: remove duplicates
 
