@@ -421,3 +421,37 @@ FROM items_conflicts
 WHERE cardinality(brand_values) > 1
 LIMIT 10;
 ```
+---
+
+## Conclusion: results at a glance
+
+The pipeline takes ~20.7 M raw events from five monthly CSV files to a single, clean,
+enriched `customers` table. Every step is checked and every removed or discarded value
+is kept:
+
+| Step | Result in `customers` | Rows | Change |
+|---|---|---:|---|
+| Load (`make database`) | — (5 monthly tables + `items`) | 20,692,840 | every CSV row loaded, 0 skipped |
+| ex01: customers table | all months joined | 20,692,840 | nothing lost: rows appended = rows loaded |
+| ex02: remove duplicates | duplicates removed | 19,175,899 | −1,516,941 (7.33%), moved to `dups_customer` |
+| ex03: fusion | item columns added | 19,175,899 | ±0 rows; 1,340 events without item kept |
+
+Tables left in the database after `make redo`:
+
+| Table | Rows | Role |
+|---|---:|---|
+| `customers` | 19,175,899 | the data warehouse table: deduplicated events + item data |
+| `data_2022_oct` … `data_2023_feb` | 20,692,840 in total | raw monthly tables, kept for inspection |
+| `items` | 109,579 | raw item catalogue |
+| `dups_customer` | 1,516,941 | every duplicate removed, with the row it repeats and its kind |
+| `items_conflicts` | 1,637 | products with conflicting item values: all alternatives + the one chosen |
+
+In ETL terms:
+- **Extract:** five monthly CSV files and one catalogue, loaded into typed tables with no
+  row lost.
+- **Transform:** months joined, duplicates removed by one explicit rule, item data merged
+  with a documented conflict rule.
+- **Load:** one consistent `customers` table, ready for the analysis modules.
+
+The whole module can be rebuilt from scratch with one command (`make redo`) and gives the
+same numbers on every run.
