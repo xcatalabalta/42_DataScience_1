@@ -137,3 +137,184 @@ The monthly tables are kept, so they can still be inspected afterwards.
 | `make fclean` | `clean`, then deletes `.env`. Run it before each evaluation. |
 
 `make help` lists all the targets.
+
+---
+
+## Solutions by exercise
+
+Every script follows the same conventions:
+
+- It connects with the settings from `.env` / `env_sample.txt`, and asks for the password
+  only if none is stored.
+- It works inside a transaction: if anything fails, the database is left as it was.
+- It quotes table and column names safely (`psycopg2.sql.Identifier`).
+- It asks before changing or deleting data. `--yes` skips the question; `make redo` passes it.
+
+### Data loading (`utils/`): prerequisite of every exercise
+
+**Main strategy**
+- `automatic_table.py` creates one table per CSV in the customer folder, named after the
+  file (`data_2022_oct.csv` → `data_2022_oct`), all with the same schema:
+  `TIMESTAMP`, `VARCHAR`, `INTEGER`, `NUMERIC`, `BIGINT`, `UUID`.
+- `items_table.py` creates `items` from `item.csv` (`INTEGER`, `BIGINT`, `VARCHAR`).
+  All its columns accept NULL, because many values are missing in the catalogue.
+- Both load with `COPY ... FROM STDIN`. The script streams the file itself, so the
+  PostgreSQL server doesn't need read access to your home folder.
+- Each table is dropped and recreated, so the load can be rerun safely.
+
+**Guards**
+- Each CSV is loaded in its own transaction: a failing file is reported, the others are
+  still loaded, and the script ends with a non-zero exit code.
+- Empty CSV fields are loaded as `NULL` (`NULL ''`), so a missing value can't abort the
+  load of millions of rows.
+- For each table, the rows loaded are compared with the data lines of its CSV, and any
+  difference is reported as "row(s) skipped".
+- A missing data folder or CSV file stops the script with a clear message.
+
+**Expected output** (`make database`)
+
+```
+Password for PostgreSQL user 'fcatala-':           <- only if .env does not exist yet
+Password verified: .env created from env_sample.txt.
+Found 5 CSV file(s) in /home/fcatala-/data_piscineds/data/customer:
+...
+Processing data_2022_dec.csv ...
+  OK: table data_2022_dec loaded with 3533286 rows.
+  Original file contains 3533286 rows of data.
+  0 row(s) skipped.
+...
+Done. 5 table(s) loaded, 0 failed.
+...
+Done. items now contains 109579 rows.
+Original CSV file contains 109579 rows of data.
+0 row(s) skipped.
+```
+
+| Table | Rows loaded | Rows in CSV |
+|---|---:|---:|
+| `data_2022_oct` | 4,102,283 | 4,102,283 |
+| `data_2022_nov` | 4,635,837 | 4,635,837 |
+| `data_2022_dec` | 3,533,286 | 3,533,286 |
+| `data_2023_jan` | 4,264,752 | 4,264,752 |
+| `data_2023_feb` | 4,156,682 | 4,156,682 |
+| **total** | **20,692,840** | |
+| `items` | 109,579 | 109,579 |
+
+### Exercise 00: Show me your DB
+
+**Main strategy**
+- DBeaver Community (Flatpak) connects to `piscineds` on `localhost:5432` with the project
+  user and password. That's the same TCP and password route the scripts use.
+- Records can be found by ID with the filter bar of a table's *Data* tab
+  (e.g. `product_id = 5779403`), or by right-clicking a cell → *Filter*.
+
+**Guards**
+- None: there is no file to turn in. `make ex00` only rebuilds the data and reminds you to
+  open DBeaver.
+
+**Expected output**
+
+```
+<!-- screenshot / description of the DBeaver view -->
+```
+
+### Exercise 01: customers table
+
+**Main strategy**
+- The monthly tables are found in the catalog (`pg_tables`, name matching
+  `^data_20[0-9]{2}_[a-z]{3}$`), not hardcoded. A new month is picked up automatically.
+- `customers` is created with `CREATE TABLE ... (LIKE <first monthly table> INCLUDING ALL)`.
+  This keeps the exact column types and `NOT NULL` constraints, which
+  `CREATE TABLE ... AS SELECT` would lose.
+- Each monthly table is appended with `INSERT ... SELECT`, which keeps every row like
+  `UNION ALL`. Duplicates are kept on purpose: removing them is exercise 02.
+- After the build is saved, the script offers to drop the monthly tables to free disk
+  space (`--keep` keeps them, `--yes` drops them without asking).
+
+**Guards**
+- Every CSV in the data folder must have a loaded table, otherwise the script stops before
+  building an incomplete `customers`. Tables without a CSV are reported as a warning.
+- For each table, the rows appended must equal the rows in the original table.
+- The final row count of `customers` must equal the sum of the monthly tables.
+- Any failed check undoes the whole build.
+- The monthly tables can only be dropped after `customers` has been saved and checked.
+
+**Expected output** (`make ex01`)
+
+```
+<!-- output of make ex01 -->
+```
+
+### Exercise 02: remove duplicates
+
+**Main strategy**
+- **Definition of a duplicate:** a row identical to the previous one in **every column
+  except `event_time`**, arriving **at most 1 second later**. `LAG(event_time)` gives the
+  previous time, over the rows grouped by all the other columns and ordered by time.
+  This catches both cases in one rule:
+  - exact duplicate: gap of 0 s → removed (`exact`)
+  - server re-send: gap of 1 s → removed (`resend`)
+  - the same action later: gap > 1 s → kept, it is a genuine new event
+- A chain of re-sends (0 s, 1 s, 2 s, ...) collapses to its first row, because each row is
+  compared with the row just before it.
+- The columns are read from the catalog, so the rule still applies if the schema changes.
+- **Rebuild and swap in one pass:** the gaps are computed once, and a single statement
+  sends the kept rows to a new table and the duplicates to `dups_customer`. The new table
+  then replaces `customers`. This is much faster than `DELETE` on ~20 M rows, and leaves no
+  dead rows to clean up.
+- `dups_customer` keeps every removed row, plus the time of the row it repeats
+  (`prev_event_time`) and its kind (`dup_kind`: `exact` or `resend`).
+
+**Guards**
+- **Conservation check:** rows kept + duplicates must equal the original count, so no row
+  can be lost or invented.
+- With `--check`: the duplicates are counted before asking for confirmation, the number
+  removed must equal that count, and a final pass verifies that no duplicate remains.
+- A rerun on already-clean data finds 0 duplicates and keeps the previous `dups_customer`
+  instead of replacing it with an empty table.
+- The script stops if `customers` or its `event_time` column is missing.
+- Everything runs in one transaction: on any error, `customers` is untouched.
+
+**Expected output** (`make ex02`)
+
+```
+<!-- output of make ex02 -->
+```
+
+### Exercise 03: fusion
+
+**Main strategy**
+
+`utils/inspect_items.sql` (`make inspect`) showed three facts that shape the fusion:
+
+1. `items` is **not unique per product** (109,579 rows for 54,043 products). A plain join
+   would multiply customer rows, so `items` is first collapsed to **one row per product**.
+2. Some repeated rows hold **conflicting values**. Rule, per product and per column: keep
+   the **most frequent non-NULL value**, and the smallest one on a tie
+   (`mode() WITHIN GROUP`). NULLs are ignored, so rows that only complete each other
+   merge cleanly. Every product with a conflict is stored in `items_conflicts`, with all
+   its alternative values and the one chosen, so no information is lost.
+3. Some customer events have **no product in `items`**. A `LEFT JOIN` keeps them, with
+   empty item columns.
+
+The script then:
+- adds the item columns, with their types read from the `items` table;
+- rebuilds `customers` as `customers LEFT JOIN items` and swaps it in (same pattern as
+  exercise 02);
+- reads `customers` only twice: once to count the rows and the events without an item,
+  once to build the new table;
+- prints the time taken by each step.
+
+**Guards**
+- The collapsed `items` has a unique index on `product_id`, so the join can't multiply rows.
+- The row count of `customers` must be the same before and after, otherwise everything is
+  undone.
+- A rerun is safe: item columns from a previous run are dropped and recomputed, never
+  duplicated, and the result is identical.
+- The script stops if `customers`, `items` or the `product_id` column is missing.
+
+**Expected output** (`make ex03`)
+
+```
+<!-- output of make ex03 -->
+```
