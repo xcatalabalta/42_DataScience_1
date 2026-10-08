@@ -24,10 +24,12 @@ ex03: ## Executes ex03 only with the directory customer
 	@./utils/decompress_customer.sh
 	@./ex03/automatic_table.py
 
-.PHONY: ex04
-ex04: ## Executes ex04 only with the directory items
-	@./utils/decompress_items.sh
-	@./ex04/items_table.py
+.PHONY: inspect
+inspect: ## Runs inspect SQL instructions for the items table
+	psql -W piscineds fcatala-
+	SELECT count(*) AS rows, count(DISTINCT product_id) AS products,
+       count(*) - count(DISTINCT product_id) AS dup_products
+	FROM items;
 
 .PHONY: fclean
 fclean: ## Cleans up database as its previous state before the first run
