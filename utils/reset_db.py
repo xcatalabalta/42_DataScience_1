@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-reset_db.py  --  "make fclean" for the piscineds database
+reset_db.py  --  table reset used by `make clean` (and `make fclean`)
 
 Drops ALL tables in the public schema of piscineds, returning the database
 to an empty state.
@@ -28,10 +28,58 @@ import sys
 import getpass
 import psycopg2
 
-DB_NAME = "piscineds"
-DB_USER = "fcatala-"
-DB_HOST = "localhost"
-DB_PORT = 5432
+
+def load_env():
+    """
+    Load the project settings into os.environ, from two files at the
+    repository root (one level above this script):
+      1. .env        created by `make getpass`, includes the password
+      2. env_sample.txt  committed defaults (everything except the password)
+    A variable already set is never overridden, so the priority is:
+    shell / make environment > .env > env_sample.txt.
+    Arguments:
+        none
+    Returns:
+        list of the files that were loaded (list of str)
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    loaded = []
+    for name in (".env", "env_sample.txt"):
+        path = os.path.join(root, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
+        loaded.append(path)
+    return loaded
+
+
+def setting(name):
+    """
+    Read one project setting from the environment (filled by load_env()).
+    Arguments:
+        name: variable name, e.g. "PGDATABASE" (str)
+    Returns:
+        its value (str); exits with a clear message if it is missing
+    """
+    value = os.environ.get(name)
+    if not value:
+        sys.exit(f"ERROR: setting {name} not found (check env_sample.txt / .env).")
+    return value
+
+
+load_env()
+
+# Settings: .env (with password) or env_sample.txt -- see load_env()
+DB_NAME = setting("PGDATABASE")
+DB_USER = setting("PGUSER")
+DB_HOST = setting("PGHOST")
+DB_PORT = int(setting("PGPORT"))
 
 # Drops every table in schema public, table-level only.
 RESET_SQL = """
@@ -47,24 +95,36 @@ END $$;
 """
 
 
-def get_password():
-    env_pw = os.environ.get("PGPASSWORD")
-    if env_pw:
-        return env_pw
-    return getpass.getpass(f"Password for PostgreSQL user '{DB_USER}': ")
+def connect_db():
+    """
+    Open a connection to the database without storing any password in the
+    code. It first tries WITHOUT a password: libpq then uses, if present,
+    PGPASSWORD, loaded from the project's .env (written by
+    `make getpass`) or exported by the shell. Only if that first attempt fails does it prompt for
+    the password (no echo) and try once more.
+    Arguments:
+        none (reads DB_NAME, DB_USER, DB_HOST and DB_PORT)
+    Returns:
+        an open psycopg2 connection
+    Exits:
+        with an error message if the second attempt also fails
+    """
+    params = dict(dbname=DB_NAME, user=DB_USER, host=DB_HOST, port=DB_PORT)
+    try:
+        return psycopg2.connect(**params)
+    except psycopg2.OperationalError:
+        pass                            # no stored password, or a wrong one
+    password = getpass.getpass(f"Password for PostgreSQL user '{DB_USER}': ")
+    try:
+        return psycopg2.connect(password=password, **params)
+    except psycopg2.OperationalError as e:
+        sys.exit(f"ERROR: could not connect to the database.\n{e}")
 
 
 def main():
     skip_confirm = ("--yes" in sys.argv)
 
-    password = get_password()
-    try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME, user=DB_USER, password=password,
-            host=DB_HOST, port=DB_PORT,
-        )
-    except psycopg2.OperationalError as e:
-        sys.exit(f"ERROR: could not connect to the database.\n{e}")
+    conn = connect_db()
 
     try:
         with conn:
