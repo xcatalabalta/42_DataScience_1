@@ -1,0 +1,12 @@
+# env_sample.txt -- project settings (committed to git, no secret inside).
+# `make getpass` copies it to .env (NOT committed, see .gitignore) and adds
+# the database password after checking it against the database.
+# The PG* names are libpq's own: psql and psycopg2 read them directly.
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=piscineds
+PGUSER=fcatala-
+PGPASSWORD=
+# Data folders, outside the repository (~ is expanded by the scripts)
+DATA_CUSTOMER=~/data_piscineds/data/customer
+DATA_ITEMS=~/data_piscineds/data/items
