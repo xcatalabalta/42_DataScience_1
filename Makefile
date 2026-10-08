@@ -26,10 +26,7 @@ ex03: ## Executes ex03 only with the directory customer
 
 .PHONY: inspect
 inspect: ## Runs inspect SQL instructions for the items table
-	psql -h /run/postgresql -U fcatala- -d piscineds
-	SELECT count(*) AS rows, count(DISTINCT product_id) AS products,
-		count(*) - count(DISTINCT product_id) AS dup_products
-	FROM items;
+	psql -h /run/postgresql -U fcatala- -d piscineds -f utils/inspect_items.sql
 
 .PHONY: fclean
 fclean: ## Cleans up database as its previous state before the first run
